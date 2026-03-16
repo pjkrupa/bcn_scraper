@@ -1,11 +1,14 @@
-import logging, time, argparse, requests
+import logging, time, argparse, requests, csv, os
 from argparse import ArgumentParser
 import pandas as pd
-from entities import Report
-from typing import Optional
+from io import StringIO
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from entities import Resource, Report
 
 
-def compile_reports(report_list: list[Report]):
+def compile_reports(report_list: list["Report"]):
     final_report = {
         'packages_success': [],
         'packages_fail': [],
@@ -113,56 +116,109 @@ def get_parser():
     )
     return parser
 
-def persistant_request(
-        logger: logging.Logger,
-        report: Report,
-        resource: dict = None,
-        package: str = None,
-        backoff_factor: int = 2,
-        max_retries: int = 3,
-        ) -> Optional[requests.Response]:
-    
+def convert_to_csv(
+        logger: logging.Logger,  
+        response: requests.Response
+        ) -> StringIO:
     """
-    A function for making multiple tries at retrieving package info and resources.
-    Works on requests for both packages and resources
+    Converts a response.Requests object to a CSV StringIO object.
+    """
+    try:
+        try:
+            decoded = response.content.decode("utf-8")
+        except UnicodeDecodeError:
+            logger.warning("UTF-8 decoding failed, retrying with UTF-16.")
+            decoded = response.content.decode('utf-16')
+
+        csv_data = StringIO(decoded)
+        reader = csv.reader(csv_data)
+
+        #simple check to see if the file is actually a CSV. if not, it throws an error.
+        first_row = next(reader)
+        
+        logger.info(f"Successfully converted response object to a CSV file.")
+        return csv_data
+
+    except csv.Error as e:
+        logger.exception(f"Response content is not valid CSV format: {e}")
+        return None
+    
+    except StopIteration:
+        logger.warning("CSV appears to be empty.")
+        return None
+
+    except Exception as e:
+        logger.exception(f"There was an error while converting the response into a CSV: {e}")
+        return None
+    
+def save_csv(logger: logging.Logger, 
+             resource: "Resource", 
+             csv: StringIO, 
+             save_path: str="./"
+             ) -> bool:
+    """
+    Saves a CSV in-memory object to disk.
 
     Args:
         logger (logging.Logger): A logging instance for recording events.
-        resource (dict): A dictionary with information about the resource. If getting a package, leave None.
-        package (str): Name of an Open Data BCN package containing multiple resources. If getting a resource, leave None.
-        backoff_factor (int): Keeps the script from hammering the servers too much.
-        max_retries (int): Maximum number of times the loop retries the request
+        resource (dict): A dictionary containing information about the resource.
+        csv (StringIO): A StringIO object that is a CSV file in memory.
+        path (str): Parameter provided by user indicating where to save file (default: root)
 
     Returns:
-        A request.Response object if a response is received, or None if no response is received.
+        A boolean operator indicating if the operation was successful or not.
     """
+    csv.seek(0)
+    
+    logger.info("Saving CSV to disk...")
 
-    attempts_remaining = max_retries
+    dir_path = os.path.join(
+        save_path, 
+        resource.package_name,
+        )
+    
+    try:
+        os.makedirs(dir_path, exist_ok=True)
+    except PermissionError as e:
+        logger.error(f"Sorry, you don't have permission to create the directory {dir_path}: {e}")
+        return False
+    
+    final_path = os.path.join(dir_path, resource.name)
 
-    while attempts_remaining > 0:
-        # This is to check if the function call is for a resource or a package.
-        if resource:
-            response = download_resource(logger, resource)
-        else:
-            response = request_resource_library(logger, package)
-            
-            
+    try:
+        with open(final_path, 'w', encoding='utf-8') as f:
+            f.write(csv.getvalue())
+        logger.info(f"Succesfully saved CSV file to {final_path}.")
+        return True
+    
+    except Exception as e:
+        logger.error(f"There was a problem saving the file: {e}")
+        return False
 
-        if response and response.status_code == 200:
-            return response
-        else:
-            if response:
-                status = response.status_code
-            else:
-                status = "No response."
-            logger.error(f"Problem with response from server: {status}.")
-            report.num_errors += 1
-            attempts_remaining -= 1
 
-            if attempts_remaining > 0:
-                wait_time = backoff_factor * (2 ** (max_retries - attempts_remaining))
-                logger.info(f"Trying again in {wait_time} seconds...")
-                time.sleep(wait_time)
+# Going to use this function eventually to load CSVs into Postgres.
+def to_df(logger: logging.Logger, resource: dict, csv: StringIO) -> pd.DataFrame:
 
-        logger.warning(f"Out of attempts.")
-        return response
+    """
+    Takes an in-memory CSV object and returns a pandas dataframe.
+
+    Args:
+        logger (logging.Logger): A logging instance for recording events.
+        resource (dict): A dictionary containing information about the resource.
+        csv (StringIO): A StringIO object that is a CSV file in memory.
+    """
+    
+    csv.seek(0)
+    
+    logger.info("-------------------------------------------")
+    logger.info(f"Converting to a dataframe...")
+    
+    try:
+        df = pd.read_csv(csv)
+        logger.info("Successfully converted CSV to a dataframe!")
+        logger.info("-------------------------------------------")
+        return df
+    except Exception as e:
+        logger.exception(f"Something went wrong: {e}")
+        logger.info("-------------------------------------------")
+        return

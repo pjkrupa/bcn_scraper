@@ -1,16 +1,120 @@
-import aiohttp, asyncio
-from models import PipelineConfigs
+import aiohttp, asyncio, time, random, os
+from models import PipelineConfigs, ResourceReport
 import logging, requests
-from typing import Optional
+from utilities import save_csv, convert_to_csv
+
 
 class Resource: 
-    def __init__(self, name: str, url: str, package_name: str):
+    def __init__(
+            self, 
+            name: str, 
+            url: str, 
+            package_name: str, 
+            logger: logging.Logger,
+            save_path: str
+            ):
         self.name = name
         self.url = url
         self.package_name = package_name
+        self.logger = logger
+        self.save_path = save_path
+        self.report = ResourceReport(name=self.name)
 
-    async def download(self, session: aiohttp.ClientSession):
-        pass
+    async def download(
+            self, 
+            session: aiohttp.ClientSession,
+            sem: asyncio.Semaphore
+        ) -> ResourceReport:
+        
+        self.report.start = time.time()
+        dir_path = os.path.join(
+            self.save_path, 
+            self.package_name,
+            )
+        os.makedirs(dir_path, exist_ok=True)
+        filepath = os.path.join(dir_path, self.name)
+
+        async with sem:
+            self.logger.info(f"Downloading resource {self.name}...")
+            try:
+                # randomly stutters the start of the downloads
+                await asyncio.sleep(random.uniform(0.1, 0.5))
+                response = await self._request_with_retry(session=session)
+                with open(filepath, "wb") as f:
+                        async for chunk in response.content.iter_chunked(8192):
+                            f.write(chunk)
+                await response.release()
+            except Exception as e:
+                self.logger.error(f"Failed to download {self.name}: {e}")
+                self.report.error = True
+
+            finally:
+                self.report.end = time.time()
+                download_time = self.report.end - self.report.start
+
+                # The logs are yellow if the process took more than 5 seconds. Move this into the logging format eventually
+                if download_time > 5:
+                    self.logger.warning(f"\033[33mResource {self.name} downloaded in {round(download_time, 3)} seconds.\033[0m")
+                else:
+                    self.logger.info(f"Resource {self.name} downloaded in {round(download_time, 3)} seconds.")
+                return self.report
+
+    async def _request_with_retry(self, session: aiohttp.ClientSession):
+        retries = 5
+
+        for attempt in range(retries):
+            try:
+                response = await session.get(url=self.url)
+                
+                if response.status == 200:
+                    return response
+                
+                status = response.status if response.status else "No response recieved"
+            except Exception as e:
+                self.logger.warning(f"The request failed: {status} -- {e}")
+                
+            if attempt < retries - 1:
+                wait = 2 ** attempt
+                self.logger.info(f"Retrying in {wait}s...")
+                await asyncio.sleep(wait)
+            
+        raise Exception(f"Failed to download {self.name} after {retries} attempts")
+
+
+    async def _persistant_request(
+            self, 
+            session: aiohttp.ClientSession
+            ) -> aiohttp.ClientResponse:
+        
+        max_retries = 5
+        attempts_remaining = max_retries
+
+        backoff_factor = 2
+        for _ in range(0,max_retries):
+            self.report.tries+=1
+            await asyncio.sleep(random.uniform(0.1, 0.5)) # this adds a little jitter so all the requests don't hit the server at once.
+            response = await session.get(url=self.url, timeout=10)
+
+            if response and response.status == 200:
+                self.success = True
+                return response
+            else:
+                if response:
+                    status = response.status
+                else:
+                    status = "No response."
+                self.logger.error(f"Problem with response from server: {status}.")
+                self.report.error = True
+                attempts_remaining-=1
+
+                if attempts_remaining > 0:
+                    wait_time = backoff_factor * (2 ** (max_retries - attempts_remaining))
+                    self.logger.info(f"Trying again in {wait_time} seconds...")
+                    await asyncio.sleep(wait_time)
+                else:
+                    self.logger.warning(f"Out of attempts.")
+                    return response
+    
 
 class Package:
     def __init__(
@@ -18,31 +122,27 @@ class Package:
             configs: PipelineConfigs, 
             package_name: str
         ):
+        self.configs = configs
+        self.logger = configs.logger
         self.name = package_name
         self.resources = self.get_resources()
-        self.logger = configs.logger
+        self.report = Report(
+            package=package_name,
+            start_time=time.time()
+        )
     
     async def get(self):
+        sem = asyncio.Semaphore(5)
         async with aiohttp.ClientSession() as session:
-            tasks = [resource.download(session=session) for resource in self.resources]
-            return await asyncio.gather(*tasks)
+            downloads = [resource.download(session=session, sem=sem) for resource in self.resources]
+            return await asyncio.gather(*downloads)
 
-    def get_resources(self):
+    def get_resources(self) -> list[Resource]:
         response = self._request_resource_list()
         if response:
             return self._process_resource_library(response=response)
 
     def _request_resource_list(self) -> requests.Response:
-        """
-        Requests the resource library for a particular package from Open Data BCN.
-
-        Args: 
-            logger (logging.Logger): A logging instance for recording events.
-            package_name (str): Name of an Open Data BCN package containing multiple resources.
-
-        Returns:
-            The requests.Response object with all the info from the response
-        """
 
         url = 'https://opendata-ajuntament.barcelona.cat/data/api/action/package_show'
         
@@ -63,16 +163,6 @@ class Package:
         response: requests.Response,
         ) -> list[Resource]:
     
-        """
-        Processes the request object to extract a package resource library into a list of dictionaries.
-
-        Args:
-            logger (logging.Logger): A logging instance for recording events.
-            response (requests.Response): A raw response object containing package information.
-            package (str): The name of the package being processed.
-        Returns:
-            A list of dictionaries.
-        """
         data = response.json()
 
         try:
@@ -86,11 +176,12 @@ class Package:
                 r = Resource(
                     name=res["name"], 
                     url=res["url"], 
-                    package_name=self.name)
+                    package_name=self.name,
+                    logger=self.logger,
+                    save_path=self.configs.storage_root)
                 csv_resources.append(r)
         return csv_resources
     
-
 
 class Report:
 
@@ -109,11 +200,11 @@ class Report:
 
     def process_package_response(self, response):
         self.total_duration += response.elapsed.total_seconds()
-        self.package_response_code = response.status_code
+        self.package_response_code = response.status
     
     def process_resource_response(self, response, resource):
         self.total_duration += response.elapsed.total_seconds()
-        if not response.status_code == 200:
+        if not response.status == 200:
             self.resources_fail.append(resource)
         else:
             self.resources_success.append(resource['name'])

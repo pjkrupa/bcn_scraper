@@ -1,5 +1,0 @@
-structure
-- i have my entities defined in entities.py. they are package, resource, and report
-- to start with, all utility functions will go in utilities.py, and i might pull them out and add them to the classes in entities.py if that makes sense
-- the main async loop will either go in main or in a different python file, not sure yet.
-- 

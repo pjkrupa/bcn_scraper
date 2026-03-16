@@ -1,3 +1,4 @@
+import time
 from dataclasses import dataclass
 from logging import Logger
 
@@ -13,3 +14,12 @@ class PipelineConfigs:
     logger: Logger
     packages: list[str]
     storage_root: str
+
+@dataclass
+class ResourceReport:
+    name: str
+    success: bool = False
+    error: bool = False
+    tries: int = 0
+    start: float = 0
+    end: float = 0
