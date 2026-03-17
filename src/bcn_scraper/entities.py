@@ -11,8 +11,10 @@ class Resource:
             url: str, 
             package_name: str, 
             logger: logging.Logger,
-            save_path: str
+            save_path: str,
+            configs: PipelineConfigs
             ):
+        self.configs = configs
         self.name = name
         self.url = url
         self.package_name = package_name
@@ -20,10 +22,11 @@ class Resource:
         self.save_path = save_path
         self.report = ResourceReport(name=self.name)
 
+    # async doesn't give any advantage with the BCN Open Data portal
+    # because requests are limited to 1/sec, but 
     async def download(
             self, 
             session: aiohttp.ClientSession,
-            sem: asyncio.Semaphore
         ) -> ResourceReport:
         
         self.report.start = time.time()
@@ -34,36 +37,36 @@ class Resource:
         os.makedirs(dir_path, exist_ok=True)
         filepath = os.path.join(dir_path, self.name)
 
-        async with sem:
-            self.logger.info(f"Downloading resource {self.name}...")
-            try:
-                # randomly stutters the start of the downloads
-                await asyncio.sleep(random.uniform(0.1, 0.5))
-                response = await self._request_with_retry(session=session)
-                with open(filepath, "wb") as f:
-                        async for chunk in response.content.iter_chunked(8192):
-                            f.write(chunk)
-                await response.release()
-            except Exception as e:
-                self.logger.error(f"Failed to download {self.name}: {e}")
-                self.report.error = True
+        self.logger.info(f"Downloading resource {self.name}...")
+        try:
+            # randomly stutters the start of the downloads
+            await asyncio.sleep(random.uniform(0.1, 0.5))
+            response = await self._request_with_retry(session=session)
+            with open(filepath, "wb") as f:
+                    async for chunk in response.content.iter_chunked(8192):
+                        f.write(chunk)
+            await response.release()
+        except Exception as e:
+            self.logger.error(f"Failed to download {self.name}: {e}")
+            self.report.error = True
 
-            finally:
-                self.report.end = time.time()
-                download_time = self.report.end - self.report.start
+        finally:
+            self.report.end = time.time()
+            download_time = self.report.end - self.report.start
 
-                # The logs are yellow if the process took more than 5 seconds. Move this into the logging format eventually
-                if download_time > 5:
-                    self.logger.warning(f"\033[33mResource {self.name} downloaded in {round(download_time, 3)} seconds.\033[0m")
-                else:
-                    self.logger.info(f"Resource {self.name} downloaded in {round(download_time, 3)} seconds.")
-                return self.report
+            # The logs are yellow if the process took more than 5 seconds. Move this into the logging format eventually
+            if download_time > 5:
+                self.logger.warning(f"\033[33mResource {self.name} downloaded in {round(download_time, 3)} seconds.\033[0m")
+            else:
+                self.logger.info(f"Resource {self.name} downloaded in {round(download_time, 3)} seconds.")
+            return self.report
 
     async def _request_with_retry(self, session: aiohttp.ClientSession):
         retries = 5
 
         for attempt in range(retries):
             try:
+                await self.configs.wait_for_slot()
                 response = await session.get(url=self.url)
                 
                 if response.status == 200:
@@ -132,9 +135,8 @@ class Package:
         )
     
     async def get(self):
-        sem = asyncio.Semaphore(5)
         async with aiohttp.ClientSession() as session:
-            downloads = [resource.download(session=session, sem=sem) for resource in self.resources]
+            downloads = [resource.download(session=session) for resource in self.resources]
             return await asyncio.gather(*downloads)
 
     def get_resources(self) -> list[Resource]:
@@ -178,7 +180,9 @@ class Package:
                     url=res["url"], 
                     package_name=self.name,
                     logger=self.logger,
-                    save_path=self.configs.storage_root)
+                    save_path=self.configs.storage_root,
+                    configs=self.configs
+                    )
                 csv_resources.append(r)
         return csv_resources
     
