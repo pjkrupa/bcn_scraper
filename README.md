@@ -1,0 +1,1 @@
+This has evolved from a tool for scraping Barcelona's Open Data repository to a general-purpose downloader that grabs all CSV resources associated with packages hosted by a CKAN REST API. Work in progress!
