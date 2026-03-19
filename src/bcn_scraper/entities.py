@@ -1,4 +1,5 @@
 import aiohttp, asyncio, time, random, os
+from urllib.parse import urljoin
 from models import PipelineConfigs, ResourceReport
 import logging, requests
 from utilities import save_csv, convert_to_csv
@@ -157,8 +158,9 @@ class Package:
 
     def _request_resource_list(self) -> requests.Response:
 
-        url = 'https://opendata-ajuntament.barcelona.cat/data/api/action/package_show'
-        
+        url = urljoin(self.configs.base_url, "/data/api/action/package_show")
+        self.logger.debug(f"Constructed URL: {url}")
+
         try:
             response = requests.get(url, params={'id': self.name}, timeout=10)
             return response
