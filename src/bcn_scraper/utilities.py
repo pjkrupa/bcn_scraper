@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from entities import Resource, Report
+    from models import PipelineConfigs
 
 
 def compile_reports(report_list: list["Report"]):
@@ -195,6 +196,15 @@ def save_csv(logger: logging.Logger,
         logger.error(f"There was a problem saving the file: {e}")
         return False
 
+def log_configs(configs: "PipelineConfigs"):
+    logger = configs.logger
+    logger.info(f"Configurations for this pipeline run...")
+    logger.info(f"Base URL: {configs.base_url}")
+    logger.info(f"Packages to download: {configs.packages}")
+    logger.info(f"Downloads will be saved to: {configs.storage_root}")
+    logger.info(f"Request rate interval: {configs.rate_interval}")
+    concurrency = None if configs.request_concurrency == 0 else configs.request_concurrency
+    logger.info(f"Request concurrency limit: {concurrency}")
 
 # Going to use this function eventually to load CSVs into Postgres.
 def to_df(logger: logging.Logger, resource: dict, csv: StringIO) -> pd.DataFrame:

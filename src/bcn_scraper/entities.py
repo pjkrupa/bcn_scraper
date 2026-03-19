@@ -12,7 +12,7 @@ class Resource:
             package_name: str, 
             logger: logging.Logger,
             save_path: str,
-            configs: PipelineConfigs
+            configs: PipelineConfigs,
             ):
         self.configs = configs
         self.name = name
@@ -27,6 +27,7 @@ class Resource:
     async def download(
             self, 
             session: aiohttp.ClientSession,
+            sem: asyncio.Semaphore = None
         ) -> ResourceReport:
         
         self.report.start = time.time()
@@ -39,13 +40,21 @@ class Resource:
 
         self.logger.info(f"Downloading resource {self.name}...")
         try:
-            # randomly stutters the start of the downloads
-            await asyncio.sleep(random.uniform(0.1, 0.5))
-            response = await self._request_with_retry(session=session)
-            with open(filepath, "wb") as f:
-                    async for chunk in response.content.iter_chunked(8192):
-                        f.write(chunk)
-            await response.release()
+            if sem:
+                async with sem:
+                    # randomly stutters the start of the downloads
+                    await asyncio.sleep(random.uniform(0.1, 0.5))
+                    response = await self._request_with_retry(session=session)
+                    with open(filepath, "wb") as f:
+                            async for chunk in response.content.iter_chunked(8192):
+                                f.write(chunk)
+                    await response.release()
+            else:
+                response = await self._request_with_retry(session=session)
+                with open(filepath, "wb") as f:
+                        async for chunk in response.content.iter_chunked(8192):
+                            f.write(chunk)
+                await response.release()
         except Exception as e:
             self.logger.error(f"Failed to download {self.name}: {e}")
             self.report.error = True
@@ -135,8 +144,9 @@ class Package:
         )
     
     async def get(self):
+        sem = asyncio.Semaphore(self.configs.request_concurrency) if self.configs.request_concurrency > 0 else None
         async with aiohttp.ClientSession() as session:
-            downloads = [resource.download(session=session) for resource in self.resources]
+            downloads = [resource.download(session=session, sem=sem) for resource in self.resources]
             return await asyncio.gather(*downloads)
 
     # add more logic here to handle problems; right now, it returns None if there's no response.

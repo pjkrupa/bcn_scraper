@@ -16,10 +16,9 @@ class PipelineConfigs:
     packages: list[str]
     storage_root: str
 
-    # rate limiting
-    # the BCN Open Data API is rate limited to 1 request per second,
-    # so this ensures that async requests are sent at that interval.
-    rate_interval: float = 1.1
+    # rate limiter that sets the request interval and request concurrency
+    rate_interval: float
+    request_concurrency: int
     rate_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     last_request_time: float = 0.0
 

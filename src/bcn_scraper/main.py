@@ -1,7 +1,7 @@
 import os, datetime, asyncio
 from logging import Logger
 from dotenv import load_dotenv
-from utilities import get_logger, get_parser, get_args
+from utilities import get_logger, get_parser, get_args, log_configs
 from models import Database, PipelineConfigs
 from entities import Package, Report
 
@@ -48,7 +48,10 @@ if __name__ == "__main__":
         logger=get_logger(path=logs_path),
         packages=packages,
         storage_root=storage_root,
-        base_url = os.getenv("BASE_URL")
+        base_url=os.getenv("BASE_URL"),
+        rate_interval=float(os.getenv("REQUEST_RATE_INTERVAL")),
+        request_concurrency=int(os.getenv("REQUEST_CONCURRENCY_LIMIT"))
     )
     
+    log_configs(configs=configs)
     run_pipeline(configs=configs)
