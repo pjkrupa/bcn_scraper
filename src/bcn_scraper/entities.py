@@ -139,6 +139,7 @@ class Package:
             downloads = [resource.download(session=session) for resource in self.resources]
             return await asyncio.gather(*downloads)
 
+    # add more logic here to handle problems; right now, it returns None if there's no response.
     def get_resources(self) -> list[Resource]:
         response = self._request_resource_list()
         if response:
@@ -155,7 +156,7 @@ class Package:
         except requests.exceptions.ConnectTimeout:
             self.logger.error(f"Connection to Open Data BCN timed out while requesting package details for '{self.name}'.")
         except requests.exceptions.Timeout:
-            self.logger.error(f"Request for package details for '{self.package_name}' timed out.")
+            self.logger.error(f"Request for package details for '{self.name}' timed out.")
         except requests.exceptions.RequestException as e:
             self.logger.error(f"Failed to fetch package '{self.name}': {e.__class__.__name__} - {e}")
             self.logger.debug("Full exception details:", exc_info=True)
@@ -184,7 +185,10 @@ class Package:
                     configs=self.configs
                     )
                 csv_resources.append(r)
-        return csv_resources
+        if not csv_resources:
+            return None
+        else:
+            return csv_resources
     
 
 class Report:

@@ -11,6 +11,7 @@ class Database:
 @dataclass
 class PipelineConfigs:
     db: Database
+    base_url: str
     logger: Logger
     packages: list[str]
     storage_root: str

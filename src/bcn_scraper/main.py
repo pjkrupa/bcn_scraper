@@ -13,7 +13,11 @@ def run_pipeline(configs: PipelineConfigs):
     for package in configs.packages:
         try:
             p = Package(configs=configs, package_name=package)
-            configs.logger.info(f"Successfully instantiated package {p.name}. Downloading resources...")
+            if p.resources is None:
+                configs.logger.warning(f"No CSV resources found for package {p.name}, skipping...")
+                continue
+            else:
+                configs.logger.info(f"Successfully instantiated package {p.name}. Downloading resources...")
         except Exception as e:
             configs.logger.error(f"Couldn't instantiate package {package}: {e}")
             continue
@@ -43,7 +47,8 @@ if __name__ == "__main__":
         ),
         logger=get_logger(path=logs_path),
         packages=packages,
-        storage_root=storage_root
+        storage_root=storage_root,
+        base_url = os.getenv("BASE_URL")
     )
     
     run_pipeline(configs=configs)
