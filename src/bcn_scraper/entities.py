@@ -1,4 +1,5 @@
 import aiohttp, asyncio, time, random, os
+from pathlib import Path
 from urllib.parse import urljoin
 from models import PipelineConfigs, ResourceReport
 import logging, requests
@@ -32,12 +33,6 @@ class Resource:
         ) -> ResourceReport:
         
         self.report.start = time.time()
-        dir_path = os.path.join(
-            self.save_path, 
-            self.package_name,
-            )
-        os.makedirs(dir_path, exist_ok=True)
-        filepath = os.path.join(dir_path, self.name)
 
         self.logger.info(f"Downloading resource {self.name}...")
         try:
@@ -46,7 +41,7 @@ class Resource:
                     # randomly stutters the start of the downloads
                     await asyncio.sleep(random.uniform(0.1, 0.5))
                     response = await self._request_with_retry(session=session)
-                    with open(filepath, "wb") as f:
+                    with open(self.save_path, "wb") as f:
                             async for chunk in response.content.iter_chunked(8192):
                                 f.write(chunk)
                     await response.release()
@@ -138,12 +133,17 @@ class Package:
         self.configs = configs
         self.logger = configs.logger
         self.name = package_name
+        self.save_directory = os.path.join(
+            os.getcwd(), self.configs.storage_root, 
+            self.name,
+            )
+        os.makedirs(self.save_directory, exist_ok=True)
         self.resources = self.get_resources()
         self.report = Report(
             package=package_name,
             start_time=time.time()
         )
-    
+         
     async def get(self):
         sem = asyncio.Semaphore(self.configs.request_concurrency) if self.configs.request_concurrency > 0 else None
         async with aiohttp.ClientSession() as session:
@@ -186,14 +186,16 @@ class Package:
             self.logger.exception(f"There was a problem accessing the resources from the request object: {e}")
             return None
         csv_resources = []
+        save_dir = Path(self.save_directory)
+        existing_resources = [f.name for f in save_dir.iterdir() if f.is_file()]
         for res in resources:
-            if res['format'] == "CSV":
+            if res['format'] == "CSV" and res["name"] not in existing_resources:
                 r = Resource(
                     name=res["name"], 
                     url=res["url"], 
                     package_name=self.name,
                     logger=self.logger,
-                    save_path=self.configs.storage_root,
+                    save_path=os.path.join(self.save_directory, res["name"]),
                     configs=self.configs
                     )
                 csv_resources.append(r)

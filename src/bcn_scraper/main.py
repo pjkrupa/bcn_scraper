@@ -14,7 +14,7 @@ def run_pipeline(configs: PipelineConfigs):
         try:
             p = Package(configs=configs, package_name=package)
             if p.resources is None:
-                configs.logger.warning(f"No CSV resources found for package {p.name}, skipping...")
+                configs.logger.warning(f"No CSV resources found for package {p.name} or all resources have already been downloaded, skipping...")
                 continue
             else:
                 configs.logger.info(f"Successfully instantiated package {p.name}. Downloading resources...")
