@@ -5,7 +5,7 @@ from io import StringIO
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from entities import Resource, Report
+    from entities import Resource, Report, Package
     from models import PipelineConfigs
 
 
@@ -203,8 +203,14 @@ def log_configs(configs: "PipelineConfigs"):
     logger.info(f"Packages to download: {configs.packages}")
     logger.info(f"Downloads will be saved to: {configs.storage_root}")
     logger.info(f"Request rate interval: {configs.rate_interval}")
+    logger.info(f"Number of retries before failure: {configs.retries}")
     concurrency = None if configs.request_concurrency == 0 else configs.request_concurrency
     logger.info(f"Request concurrency limit: {concurrency}")
+
+def final_report(final_report: list["Package"]):
+    for package in final_report:
+        pass
+        #do something here
 
 # Going to use this function eventually to load CSVs into Postgres.
 def to_df(logger: logging.Logger, resource: dict, csv: StringIO) -> pd.DataFrame:

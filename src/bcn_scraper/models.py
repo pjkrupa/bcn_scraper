@@ -19,6 +19,7 @@ class PipelineConfigs:
     # rate limiter that sets the request interval and request concurrency
     rate_interval: float
     request_concurrency: int
+    retries: int
     rate_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     last_request_time: float = 0.0
 

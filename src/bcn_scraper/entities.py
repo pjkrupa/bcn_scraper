@@ -31,10 +31,7 @@ class Resource:
             session: aiohttp.ClientSession,
             sem: asyncio.Semaphore = None
         ) -> ResourceReport:
-        
-        self.report.start = time.time()
 
-        self.logger.info(f"Downloading resource {self.name}...")
         try:
             if sem:
                 async with sem:
@@ -72,6 +69,8 @@ class Resource:
         for attempt in range(retries):
             try:
                 await self.configs.wait_for_slot()
+                self.report.start = time.time()
+
                 response = await session.get(url=self.url)
                 
                 if response.status == 200:
@@ -85,8 +84,8 @@ class Resource:
                 wait = 2 ** attempt
                 self.logger.info(f"Retrying in {wait}s...")
                 await asyncio.sleep(wait)
-            
-        raise Exception(f"Failed to download {self.name} after {retries} attempts")
+        
+        raise Exception(f"Download failed after {retries} attempts")
 
 
     async def _persistant_request(
